@@ -1,4 +1,3 @@
-import threading
 from enum import Enum
 import threading
 import argparse
@@ -121,7 +120,7 @@ class client :
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
                 # Le asignamos un puerto disponible aleatorio y obtenemos su puerto
-                server_address = ('localhost', 0)
+                server_address = ('0.0.0.0', 0)
                 sock.bind(server_address)
                 sock.listen(SO_MAX_CONN)
                 host, client._server_port = sock.getsockname()
