@@ -79,7 +79,7 @@ int db_test () {
 
 
 // ========================================================================
-// FUNCIONES EXTERNAS (SE PROTEGEN CON MUTEX SOLAS)
+// FUNCIONES DE LA DB (NECESITAS SER PROTEGIDAS POR SUS LLAMANTES)
 // ========================================================================
 
 
@@ -87,12 +87,9 @@ int db_test () {
 // 0 = OK // 1 = USER_NOT_FOUND
 int insert_user (char *user) { // TERMINADA
 
-    pthread_mutex_lock(&lock_db);
-
     // Verificamos si el usuario ya existe
     user_t *old = search_user(user);
     if (old != NULL) {
-        pthread_mutex_unlock(&lock_db);
         return 1;
     }
 
@@ -129,8 +126,6 @@ int insert_user (char *user) { // TERMINADA
     // Actualizamos la db
     save_db ();
 
-    pthread_mutex_unlock(&lock_db);
-
     return 0;
 }
 
@@ -139,13 +134,10 @@ int insert_user (char *user) { // TERMINADA
 // 0 = OK // 1 = USER_NOT_FOUND
 int delete_user (char *user) { // TERMINADA
 
-    pthread_mutex_lock(&lock_db);
-
     user_t *current = search_user(user);
 
     // Caso 1: El usuario no se encuentra
     if (current == NULL)  {
-        pthread_mutex_unlock(&lock_db);
         return 1;
     }
 
@@ -204,8 +196,6 @@ int delete_user (char *user) { // TERMINADA
     // Actualizamos la db
     save_db ();
 
-    pthread_mutex_unlock(&lock_db);
-
     return 0;
 }
 
@@ -214,18 +204,14 @@ int delete_user (char *user) { // TERMINADA
 // 0 = OK // 1 = USER_NOT_FOUND // 2 = USER_ALREADY_CONNECTED
 int connect_user (char *user, char *ip, int port) { // TERMINADA
 
-    pthread_mutex_lock(&lock_db);
-
     user_t *current = search_user(user);
     
     // Si el usuario no existe retornamos 1
     if (current == NULL) {
-        pthread_mutex_unlock(&lock_db);
         return 1;
     }
 
     if (current->connected == 1) {
-        pthread_mutex_unlock(&lock_db);
         return 2;
     }
 
@@ -240,8 +226,6 @@ int connect_user (char *user, char *ip, int port) { // TERMINADA
     // Actualizamos la db
     save_db ();
 
-    pthread_mutex_unlock(&lock_db);
-
     return 0;
 }
 
@@ -250,19 +234,15 @@ int connect_user (char *user, char *ip, int port) { // TERMINADA
 // 0 = OK // 1 = USER_NOT_FOUND // 2 = USER_ALREADY_DISCONNECTED
 int disconnect_user (char *user) { // TERMINADA
 
-    pthread_mutex_lock(&lock_db);
-
     user_t *current = search_user(user);
     
     // Si el usuario no se encuentra retornamos 1
     if (current == NULL) {
-        pthread_mutex_unlock(&lock_db);
         return 1;
     }
 
     // Si el cliente ya está desonectado retornamos 2
     if (current->connected == 0) {
-        pthread_mutex_unlock(&lock_db);
         return 2;
     }
 
@@ -275,17 +255,10 @@ int disconnect_user (char *user) { // TERMINADA
 
     // Actualizamos la db
     save_db ();
-
-    pthread_mutex_unlock(&lock_db);
+    
     return 0;
 
 }
-
-
-
-// ========================================================================
-// FUNCIONES INTERNAS (DEBEN SER PROTEGIDAS POR SUS LLAMANTES)
-// ========================================================================
 
 
 // Busca al usuario y retorna su puntero si lo encuentra

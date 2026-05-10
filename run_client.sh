@@ -1,0 +1,1 @@
+python3 client.py -s $1 -p $2

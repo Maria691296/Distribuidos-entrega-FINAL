@@ -1,69 +1,21 @@
-# Ubuntu 22.04 LTS in Docker (v2.1)
+Obtención del ejecutable
 
-## Using u22-docker
-
-<html>
- <table>
-  <tr>
-  <th>Summary</th>
-  <th>Example of work session</th>
-  </tr>
-  <tr>
-  <td>
-</html>
-
-  * First time + "each time u22-dockerfile is updated":
-    * ./u22.sh build
-
-  * To start **3** containers:
-    *  ./u22.sh start **3**
-
-  * To get into container **2**:
-    *  ./u22.sh bash **2**
-
-  * Being within **2**, to exit:
-    *  exit
-
-  * To stop the containers:
-    *  ./u22.sh stop
-
-  * Available options for debugging:
-    *  ./u22.sh status
-    *  ./u22.sh network
-
-<html>
-  </td>
-  <td>
-</html>
-
-  * To start:
-    * To start a work session with **2** containers, please execute:
-      *  ./u22.sh start **2**
-    * To check the containers are running please use:
-      *  ./u22.sh status
-    * To get the containers internal IP address please use:
-      *  ./u22.sh network
-
-  * To work with some container:
-    * To get into container **1** out of 2 please execute:
-      *  ./u22.sh bash **1**
-    * <some work inside container **1** at /work directory>
-    * To exit from container **1** please use:
-      *  exit
-
-  * To stop:
-    * To stop the work session please use:
-      *  ./u22.sh stop
-
-<html>
-  </td>
-  </tr>
- </table>
-</html>
+Para compilarlo, necesitamos las condiciones del entorno docker propuesto para la práctica de AG.
+Para cada dispositivo o working directory ejecutamos en la terminal (una vez por sitio donde se necesiten los ejecutables), dentro de cualquiera de los contenedores lo siguiente:
+&> make
 
 
-**Please beware of**:
-  * Any modification outside /work will be discarded on container stopping.
-  * Please make a backup of your work "frequently".
-  * You might need to use "sudo" before ./u22.sh if your user doesn't belong to the docker group (could be solved by using "sudo usermod -aG docker ${USER}")
 
+Forma de ejecutar
+
+Una vez compilado, dependiendo del rol que vaya a tomar el contenedor docker actual, tomamos uno de los 3 caminos para establecer los roles.
+
+1) CLIENTE: Ejecutar el script que instala pip3, las dependencias de spyne, zeep y lxml, inicia el servidor web service de SOAP11 y finalmente ejecuta el cliente que apunta al servidor cuya dirección está especificada como parámetros.
+      &> ./prep_client [DIRECCIÓN DEL SERVIDOR] [PUERTO DEL SERVIDOR]
+
+2) SERVIDOR: Establece la variable de entorno y ejecuta directamente el servidor
+      &> ./prep_servidor [DIRECCIÓN DEL SERVIDOR RPC] [PUERTO DE ALOJAMIENTO DEL SERVIDOR]
+Una vez compilado, dependiendo del rol que vaya a tomar el contenedor docker actual, tomamos uno de los 3 caminos para establecer los roles.
+
+3) SERVIDOR DE LOGS RPC: No necesita más dependencias de las que hay instaladas ya en el docker, ejecutamos directamente
+      &> ./log_client

@@ -69,7 +69,7 @@ int sendNumber(int socket, int number);
 void my_connect(int newsd, char *peer_ip);
 
 // 
-void my_disconnect(int newsd);
+void my_disconnect(int newsd, char *peer_ip);
 
 // 
 void my_register(int newsd);

@@ -1,11 +1,3 @@
-"""
-Servicio Web SOAP para normalización de mensajes.
-Elimina espacios en blanco repetidos de los mensajes.
-
-Ejecutar con: python3 web_service.py
-Requiere:     pip3 install spyne lxml zeep
-"""
-
 import re
 from wsgiref.simple_server import make_server
 from spyne import Application, rpc, ServiceBase, Unicode

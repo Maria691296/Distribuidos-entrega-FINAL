@@ -3,20 +3,15 @@
 
 # Parameters
 
-CLIENT = log_client
 SERVER = log_server
 
-SOURCES_CLNT.c = 
-SOURCES_CLNT.h = 
 SOURCES_SVC.c = 
 SOURCES_SVC.h = 
 SOURCES.x = log.x
 
 TARGETS_SVC.c = log_svc.c log_server.c log_xdr.c 
-TARGETS_CLNT.c = log_clnt.c log_client.c log_xdr.c 
-TARGETS = log.h log_xdr.c log_clnt.c log_svc.c log_client.c log_server.c
+TARGETS = log.h log_xdr.c log_clnt.c log_svc.c log_server.c
 
-OBJECTS_CLNT = $(SOURCES_CLNT.c:%.c=%.o) $(TARGETS_CLNT.c:%.c=%.o)
 OBJECTS_SVC = $(SOURCES_SVC.c:%.c=%.o) $(TARGETS_SVC.c:%.c=%.o)
 
 # Compiler flags 
@@ -31,17 +26,12 @@ OBJECTS_MAIN = server.o db.o log_clnt.o log_xdr.o
 
 # Targets 
 
-all : $(MAIN_SERVER) $(CLIENT) $(SERVER)
+all : $(MAIN_SERVER) $(SERVER)
 
 $(TARGETS) : $(SOURCES.x) 
 	rpcgen $(RPCGENFLAGS) $(SOURCES.x)
 
-$(OBJECTS_CLNT) : $(SOURCES_CLNT.c) $(SOURCES_CLNT.h) $(TARGETS_CLNT.c) 
-
 $(OBJECTS_SVC) : $(SOURCES_SVC.c) $(SOURCES_SVC.h) $(TARGETS_SVC.c) 
-
-$(CLIENT) : $(OBJECTS_CLNT) 
-	$(LINK.c) -o $(CLIENT) $(OBJECTS_CLNT) $(LDLIBS) 
 
 $(SERVER) : $(OBJECTS_SVC) 
 	$(LINK.c) -o $(SERVER) $(OBJECTS_SVC) $(LDLIBS)
@@ -52,4 +42,4 @@ $(MAIN_SERVER) : $(OBJECTS_MAIN)
 $(OBJECTS_MAIN) : $(TARGETS) server.h db.h
 
 clean:
-	$(RM) core log.h log_xdr.c log_clnt.c log_svc.c $(OBJECTS_CLNT) $(OBJECTS_SVC) $(OBJECTS_MAIN) $(CLIENT) $(SERVER) $(MAIN_SERVER)
+	$(RM) core log.h log_xdr.c log_clnt.c log_svc.c $(OBJECTS_SVC) $(OBJECTS_MAIN) $(SERVER) $(MAIN_SERVER)

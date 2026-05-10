@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <limits.h>
+#include <netdb.h>
 
 
 sem_t semaforo;
@@ -182,13 +183,16 @@ void my_connect(int newsd, char *peer_ip) {
     rpc_log(user, "CONNECT", "");
 
     // Ejecutamos la función real sobre la db
+    pthread_mutex_lock(&lock_db);
     codigo_respuesta = connect_user(user, peer_ip, listen_port);
+    pthread_mutex_unlock(&lock_db);
 
     // Mandamos el código de respuesta de vuelta
     sendMessage(newsd, (char *) &codigo_respuesta, 1);
 
     if (codigo_respuesta == 0) {
         printf("s> CONNECT %s OK\n", user);
+        fflush(stdout);
 
         // Tocamos la db, activamos el mutex
         pthread_mutex_lock(&lock_db);
@@ -201,18 +205,19 @@ void my_connect(int newsd, char *peer_ip) {
             codigo_connected = my_send_connected(user, message_ptr);
             if (codigo_connected != 0) { insert_first_message(user, message_ptr); break; }
             my_send_ACK(message_ptr);
+            free(message_ptr);
             message_ptr = pop_first_message(user);
         }
 
         pthread_mutex_unlock(&lock_db);
 
     }
-    else {printf("s> CONNECT %s FAIL\n", user);}
+    else {printf("s> CONNECT %s FAIL\n", user); fflush(stdout);}
 }
 
 
 // 
-void my_disconnect(int newsd) {
+void my_disconnect(int newsd, char *peer_ip) {
     // Declaración de variables necesarias
     int codigo_respuesta = -1;
     char user[MAX_STR_LEN];
@@ -224,10 +229,23 @@ void my_disconnect(int newsd) {
     rpc_log(user, "DISCONNECT", "");
 
     // Ejecutamos la funcionalidad real sobre la db
+    pthread_mutex_lock(&lock_db);
+    
+    // Si la IP CONNECT != IP DISCONNECT rechazamos la operación
+    user_t *user_ptr = search_user(user);
+    if (user_ptr != NULL && user_ptr->connected == 1 && strcmp(user_ptr->return_ip, peer_ip) != 0) {
+        pthread_mutex_unlock(&lock_db);
+        codigo_respuesta = 3;
+        sendMessage(newsd, (char *) &codigo_respuesta, 1);
+        return;
+    }
+
     codigo_respuesta = disconnect_user(user);
+    pthread_mutex_unlock(&lock_db);
 
     if (codigo_respuesta == 0) printf("s> DISCONNECT %s OK\n", user);
     else printf("s> DISCONNECT %s FAIL\n", user);
+    fflush(stdout);
 
     // Mandamos el código de respuesta de vuelta
     sendMessage(newsd, (char *) &codigo_respuesta, 1);
@@ -244,7 +262,9 @@ void my_register(int newsd) {
     readMessage(newsd, user);
 
     // Ejecutamos el código real de la db
+    pthread_mutex_lock(&lock_db);
     codigo_respuesta = insert_user(user);
+    pthread_mutex_unlock(&lock_db);
 
     // Registramos los datos de operación con RPC
     rpc_log(user, "REGISTER", "");
@@ -252,6 +272,7 @@ void my_register(int newsd) {
     // Feedback por terminal del servidor
     if (codigo_respuesta == 0) printf("s> REGISTER %s OK\n", user);
     else printf("s> REGISTER %s FAIL\n", user);
+    fflush(stdout);
 
 
     // Mandamos el código de respuesta de vuelta
@@ -272,10 +293,13 @@ void my_unregister(int newsd) {
     rpc_log(user, "UNREGISTER", "");
 
     // Ejecutamos el código real de la db
+    pthread_mutex_lock(&lock_db);
     codigo_respuesta = delete_user(user);
+    pthread_mutex_unlock(&lock_db);
 
     if (codigo_respuesta == 0) printf("s> UNREGISTER %s OK\n", user);
     else printf("s> UNREGISTER %s FAIL\n", user);
+    fflush(stdout);
 
     // Mandamos el código de respuesta de vuelta
     sendMessage(newsd, (char *) &codigo_respuesta, 1);
@@ -293,13 +317,12 @@ void my_users(int newsd) {
 
     // Recibimos la cadena que representa al usuario
     readMessage(newsd, user);
-    
-
-    // Acceso protegido a la db
-    pthread_mutex_lock(&lock_db);
 
     // Registramos los datos de operación con RPC
     rpc_log(user, "USERS", "");
+
+    // Acceso protegido a la db
+    pthread_mutex_lock(&lock_db);
 
     codigo_respuesta = check_user_status(user);
     if (codigo_respuesta == 0) user_list = return_connected();
@@ -310,10 +333,11 @@ void my_users(int newsd) {
     sendMessage(newsd, (char *) &codigo_respuesta, 1);
 
     // Si no está conectado, salimos
-    if (codigo_respuesta != 0) { printf("s> CONNECTEDUSERS FAIL\n"); return; }
+    if (codigo_respuesta != 0) { printf("s> CONNECTEDUSERS FAIL\n"); fflush(stdout); return; }
 
     // Si está conectado mandamos los usuarios uno por uno
     printf("s> CONNECTEDUSERS OK\n");
+    fflush(stdout);
 
     // Avisamos al cliente de los mensajes que va a recibir
     sendNumber(newsd, my_db.connected_users);
@@ -349,23 +373,17 @@ void my_send(int newsd, int is_sendattach) {
     readMessage(newsd, user_from);
     readMessage(newsd, user_to);
     readMessage(newsd, message);
-    if (is_sendattach == 1) {
-        readMessage(newsd, filename);
-        // Registramos los datos de operación con RPC
-        rpc_log(user_from, "SENDATTACH", filename);
-    }
-
-    else {
-        // Registramos los datos de operación con RPC
-        rpc_log(user_from, "SEND", "");
-    }
-    
+    if (is_sendattach == 1) readMessage(newsd, filename);
 
     // DEBUG
     // printf("%s -> %s\n", user_from, user_to);
     // printf("SEND/SENDATTACH code is: %d\n", is_sendattach);
 
     // COMPROBACIONES INTERNAS
+
+    // Registramos los datos de operación con RPC
+    if (is_sendattach == 0) rpc_log(user_from, "SEND", "");
+    if (is_sendattach == 1) rpc_log(user_from, "SENDATTACH", filename);
 
     // Adquirimos el mutex para evitar problemas de condiciones de carrera en la db
     pthread_mutex_lock(&lock_db);
@@ -388,11 +406,15 @@ void my_send(int newsd, int is_sendattach) {
     if (id_mensaje == UINT_MAX) user_from_ptr->message_id = 0;
 
     // Almacenamos el mensaje en la db
-    insert_message(user_to, id_mensaje, user_from, message, filename);
+    codigo_respuesta = insert_message(user_to, id_mensaje, user_from, message, filename);
 
     // Mandamos el código de respuesta de vuelta (el servidor ha recibido el mensaje)
-    codigo_respuesta = 0;
     sendMessage(newsd, (char *) &codigo_respuesta, 1);
+
+    // Si el usuario no existe se termina la función aquí
+    if (codigo_respuesta == 1) { pthread_mutex_unlock(&lock_db); return; }
+
+
     sendNumber(newsd, id_mensaje);
 
     // Si el usuario receptor está conectado
@@ -402,13 +424,22 @@ void my_send(int newsd, int is_sendattach) {
         codigo_respuesta = my_send_connected(user_to, message_ptr);
 
         // Si se logra enviar el mensaje, notificamos al remitente y liberamos el mensaje
-        if (codigo_respuesta == 0) { my_send_ACK(message_ptr); free(message_ptr); }
+        if (codigo_respuesta == 0) { 
+            my_send_ACK(message_ptr);
+            printf("s> SEND MESSAGE %d FROM %s TO %s\n", id_mensaje, user_from, user_to);
+            free(message_ptr);
+        }
 
         // Si no ha habido éxito, reinsertamos el mensaje donde estaba
         if (codigo_respuesta != 0) {
             insert_last_message(user_to, message_ptr);
+            printf("s> MESSAGE %d FROM %s TO %s STORED\n", id_mensaje, user_from, user_to);
         }
     }
+
+    // Si el usuario no está conectado damos feedback de stored
+    else printf("s> MESSAGE %d FROM %s TO %s STORED\n", id_mensaje, user_from, user_to);
+
     pthread_mutex_unlock(&lock_db);
 }
 
@@ -419,16 +450,17 @@ int my_send_connected (char *user, message_t *message) {
 
     // Creamos el socket descriptor del s-s-c
     int newsd = create_socket();
-    if (newsd < 0) return 1;
+    if (newsd < 0) { disconnect_user(user); return 1; }
 
     // Obtenemos los datos de la conexión del usuario para saber dónde mandar los datos
     user_t *user_ptr = search_user(user);
     struct sockaddr_in remote_addr = configure_socket(user_ptr->return_ip, user_ptr->return_port);
 
-    // Nos conectamos al thread
+    // Nos conectamos al thread de escucha del cliente
     int ret = connect(newsd, (struct sockaddr *) &remote_addr, sizeof(remote_addr)) ;
     if (ret < 0) {
         perror("ERROR en connect: ");
+        disconnect_user(user);
         return 1;
     }
 
@@ -449,9 +481,6 @@ int my_send_connected (char *user, message_t *message) {
         sendMessage(newsd, message->message, strlen(message->message) + 1);
         sendMessage(newsd, message->filename, strlen(message->filename) + 1);
     }
-
-    // Damos feedback del mensaje enviado
-    printf("\ns> SEND MESSAGE %d FROM %s TO %s\n", message->id, message->transmitter, user);  // TODO COMPROBAR PRINT GENÉRICO ESTA BIEN??
 
     // Cerramos la conexión al thread de escucha
     close(newsd);
@@ -542,7 +571,7 @@ void *atender_peticion ( void *arg )
 
     if (strcmp("CONNECT\0", buffer) == 0) my_connect(newsd, peer_ip);
 
-    if (strcmp("DISCONNECT", buffer) == 0) my_disconnect(newsd);
+    if (strcmp("DISCONNECT", buffer) == 0) my_disconnect(newsd, peer_ip);
 
     if (strcmp("REGISTER", buffer) == 0) my_register(newsd);
 
@@ -581,9 +610,6 @@ int main ( int argc, char **argv )
     // Obtenemos el valor de la variable de entorno para RPC
     LOG_RPC_IP = getenv("LOG_RPC_IP");
     
-    // DEBUG
-    printf("c> LOG_RPC_IP = %s\n", LOG_RPC_IP);
-
     // Almacenamos el puerto de alojamiento del servidor
     int puerto = atoi(argv[1]) ;
 
@@ -608,8 +634,15 @@ int main ( int argc, char **argv )
     size = sizeof(struct sockaddr_in) ;
     bzero(&server_addr, size);
     getsockname(sd, (struct sockaddr *) &server_addr, &size);
-    printf("s> init server %s:%d\n", inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
 
+    // Obtener la dirección real del socket (la anterior retorna 0.0.0.0 siempre)
+    char hostname[256];
+    gethostname(hostname, sizeof(hostname));
+    struct hostent *host_entry = gethostbyname(hostname);
+    char *server_ip = inet_ntoa(*((struct in_addr*) host_entry->h_addr_list[0]));
+
+    // Feedback de inicialización
+    printf("s> init server %s:%d\n", server_ip, ntohs(server_addr.sin_port));
     printf("s>\n");
     fflush(stdout);
 
@@ -627,8 +660,6 @@ int main ( int argc, char **argv )
 
     while (1)
     {
-        // Separamos las peticiones 1 hueco
-
         // Limpiamos la basura en memoria
         bzero(&client_addr, size);
         size = sizeof(struct sockaddr_in) ;
@@ -638,22 +669,6 @@ int main ( int argc, char **argv )
             perror("Error en el accept");
             return -1 ;
         }
-
-        /*
-        // <Ayuda a la depuración>
-            // a) dirección rellenada por llamada accept()
-            printf("conexión aceptada de IP:%s y puerto:%d\n",
-                    inet_ntoa(client_addr.sin_addr),
-                        ntohs(client_addr.sin_port));
-            // b) dirección asociada al socket newsd en otro extremo
-            char sck_IP[32] ;
-            size = sizeof(struct sockaddr_in) ;
-            getpeername(newsd, (struct sockaddr *)&client_addr, &size);
-            inet_ntop(AF_INET, &(client_addr.sin_addr), sck_IP, sizeof(sck_IP));
-            printf("conexión aceptada de IP:%s y puerto:%d\n",
-                    sck_IP, ntohs(client_addr.sin_port));
-        // </Ayuda a la depuración>
-        */
 
         // Atender peticiones
 

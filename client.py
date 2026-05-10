@@ -98,7 +98,7 @@ class client :
             while True:
                 msg = socket.recv(1) # Lee un byte en formato de red (python no sabe lo que es)
                 message_len += 1
-                if (msg == b'\0' or bytes == MAX_STR_LEN): # El formato b'x' traduce x a binario para poder compararlo
+                if (msg == b'\0' or message_len == MAX_STR_LEN): # El formato b'x' traduce x a binario para poder compararlo
                     break
                 message += msg.decode() # Lo convierte a un formato legible para Python
             return message
@@ -159,7 +159,7 @@ class client :
 
 
     @staticmethod
-    def _server_open ():
+    def _server_open (user):
         try:
             if not client._local_server_open:
                 # Crear el socket del client-side-server
@@ -178,6 +178,7 @@ class client :
                 # Asignamos valores a las variables de la clase
                 client._local_server_open = True
                 client._local_server_sock = sock
+                client._user = user
 
                 # Creamos y arrancamos el hilo
                 client._local_server_thread = threading.Thread(target = client._server_listen)
@@ -239,7 +240,6 @@ class client :
                 if operation == "GET_FILE":
                     user = client._recieveMessage(connection)
                     filename = client._recieveMessage(connection)
-                    print(f"c> CONFIRMACION DE FICHERO???")
                     # TODO ENVIADO DEL FICHERO
                     with open(filename, "rb") as file:
                         while True:
@@ -252,12 +252,13 @@ class client :
                 connection.close()
         
     @staticmethod
-    def _server_close ():
+    def _server_close (user):
         try:
-            if client._local_server_open:
+            if client._local_server_open and client._user == user:
                 client._local_server_open = False
                 client._local_server_thread.join()
                 client._local_server_sock.close()
+                client._user = None
         except Exception as e:
             print(f"Hubo un error cerrando el client-side-server:\n{e}")
 
@@ -305,7 +306,7 @@ class client :
             code = 2
         
         if code == 0:
-            client._user = None
+            client._server_close(user)
             print("c> UNREGISTER OK")
             return client.RC.OK
         elif code == 1:
@@ -319,7 +320,7 @@ class client :
     @staticmethod
     def  connect(user) :
         
-        port = client._server_open()
+        port = client._server_open(user)
 
         try:
             sock = client._client_open(client._remote_server_ip, client._remote_server_port)
@@ -333,20 +334,17 @@ class client :
 
         # En cualquier caso de fallo, cerramos la conexion de inmediato
         if code == 0:
-            client._user = user
             print("c> CONNECT OK")
             return client.RC.OK
         elif code == 1:
-            client._server_close()
+            client._server_close(user)
             print("c> CONNECT FAIL, USER DOES NOT EXIST")
             return client.RC.USER_ERROR
         elif code == 2:
-            client._server_close()
-            client._user = user
             print("c> USER ALREADY CONNECTED")
             return client.RC.USER_ERROR
         elif code == 3:
-            client._server_close()
+            client._server_close(user)
             print("c> CONNECT FAIL")
             return client.RC.ERROR
         return client.RC.ERROR
@@ -415,7 +413,7 @@ class client :
             client._sendMessage(sock, user)
             code = client._recieveCode(sock)
             client._client_close(sock)
-            client._server_close()
+            client._server_close(user)
         except Exception as e:
             code = 3
 
@@ -525,7 +523,6 @@ class client :
     def shell():
 
         while (True) :
-            time.sleep(1)
             try :
                 command = input("c> ")
                 line = command.split(" ")
@@ -588,7 +585,7 @@ class client :
 
                     elif(line[0]=="QUIT") :
                         if (len(line) == 1) :
-                            client._server_close() # CIERRA EL HILO POR SEGURIDAD
+                            client._server_close(client._user) # CIERRA EL HILO POR SEGURIDAD
                             break
                         else :
                             print("Syntax error. Use: QUIT")
