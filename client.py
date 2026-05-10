@@ -8,36 +8,65 @@ import sys
 SO_MAX_CONN = 20
 SOCK_TIMEOUT = 1
 MAX_STR_LEN = 256
+FILE_PACKAGE_SIZE = 1024
 
 class client :
 
-    # ******************** TYPES *********************
-    # *
-    # * @brief Return codes for the protocol methods
+    # =================================================================================================
+    # Retornos de las funcionalidades
+    # =================================================================================================
+
     class RC(Enum) :
         OK = 0
         ERROR = 1
         USER_ERROR = 2
 
-    # ****************** ATTRIBUTES ******************
-    # Direccion del servidor
-    _server = None
-    _port = -1
 
-    # Elementos del cliente
-    _client_sock = None
+    # =================================================================================================
+    # Retornos de las funcionalidades
+    # =================================================================================================
 
-    # Elementos del client-side-server
-    _hilo = None
-    _server_port = None
-    _server_sock = None
-    _is_server_open = False
-
+    # Datos de la sesión
+    
     # Usuario que utiliza la interfaz
     _user = None
 
+    # Listado de usuarios conectados y sus threads de escucha
+    _user_list = {}
 
-    # Métodos de comunicación
+
+
+    # Datos locales
+
+    # Dirección del client-side-client (nuestra direccion actual)
+    _local_client_ip = 0
+    _local_client_port = 0
+
+    # Dirección del client-side-server (nuestro thread de escucha)
+    _local_server_ip = 0
+    _local_server_port = 0
+    _local_server_sock = None
+    _local_server_open = False
+    _local_server_thread = None
+
+
+
+    # Datos remotos
+
+    # Dirección del server-side-server (server.c)
+    _remote_server_ip = 0
+    _remote_server_port = 0
+
+    # Dirección del server-side-client (server.c // client.py)
+    _remote_client_ip = 0
+    _remote_client_port = 0
+
+
+
+    # =================================================================================================
+    # Métodos de comunicación por sockets
+    # =================================================================================================
+
 
     # Envía cadenas de 256 bytes acabadas en '\0', trunca cadenas más largas y las corrige
     @staticmethod
@@ -85,36 +114,43 @@ class client :
             raise Exception(f"{e}")
 
 
+
+    # =================================================================================================
     # Métodos del cliente
+    # =================================================================================================
+
 
     @staticmethod
-    def _client_open ():
+    def _client_open (ip, port):
         try:
-            client._client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_address = (client._server, client._port)
-            return client._client_sock.connect(server_address)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_address = (ip, port)
+            sock.connect(server_address)
+            return sock
         except Exception as e:
             # print(f"Error inesperado: {e}")
             raise Exception(f"{e}")
 
 
     @staticmethod
-    def _client_close ():
+    def _client_close (sock):
         try:
-            client._client_sock.close()
+            sock.close()
         except Exception as e:
             # print(f"Error inesperado: {e}")
             raise Exception(f"{e}")
-        finally:
-            client._client_sock = None
 
 
+
+    # =================================================================================================
     # Métodos del client-side-server
+    # =================================================================================================
+
 
     @staticmethod
     def _server_open ():
         try:
-            if not client._is_server_open:
+            if not client._local_server_open:
                 # Crear el socket del client-side-server
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -123,34 +159,33 @@ class client :
                 server_address = ('0.0.0.0', 0)
                 sock.bind(server_address)
                 sock.listen(SO_MAX_CONN)
-                host, client._server_port = sock.getsockname()
+                host, client._local_server_port = sock.getsockname()
 
                 # Establecemos un timeout para hacer un join limpio del hilo
                 sock.settimeout(SOCK_TIMEOUT)
 
                 # Asignamos valores a las variables de la clase
-                client._is_server_open = True
-                client._server_sock = sock
+                client._local_server_open = True
+                client._local_server_sock = sock
 
                 # Creamos y arrancamos el hilo
-                client._hilo = threading.Thread(target = client._server_listen)
-                client._hilo.start()
+                client._local_server_thread = threading.Thread(target = client._server_listen)
+                client._local_server_thread.start()
                 
-            return client._server_port
+            return client._local_server_port
 
         except Exception as e:
             print(f"Fallo al abrir el client-side-server: {e}")
             return -1
 
-
     @staticmethod
     def _server_listen ():
 
-        while client._is_server_open:
+        while client._local_server_open:
 
             # Aceptar peticiones, revisando si hay que hacer join
             try:
-                connection, client_address = client._server_sock.accept()
+                connection, client_address = client._local_server_sock.accept()
             except socket.timeout:
                 continue
 
@@ -172,36 +207,64 @@ class client :
                     ack_mssg_id = client._recieveMessage(connection)
                     print(f"c> SEND MESSAGE {ack_mssg_id} OK")
 
+                
+                if operation == "SEND_MESSAGE_ATTACH":
+                    transmitter = client._recieveMessage(connection)
+                    recv_mssg_id = client._recieveMessage(connection)
+                    message = client._recieveMessage(connection)
+                    filename = client._recieveMessage(connection)
+                    print(f"c> MESSAGE {recv_mssg_id} FROM {transmitter}")
+                    print(f"c> {message}")
+                    print(f"c> END")
+                    print(f"c> {filename}")
+
+
+                if operation == "SEND_MESS_ATTACH_ACK":
+                    ack_mssg_id = client._recieveMessage(connection)
+                    ack_mssg_filename = client._recieveMessage(connection)
+                    print(f"c> SENDATTACH MESSAGE {ack_mssg_id} {ack_mssg_filename} OK")
+                
+
+                if operation == "GET_FILE":
+                    user = client._recieveMessage(connection)
+                    filename = client._recieveMessage(connection)
+                    print(f"c> CONFIRMACION DE FICHERO???")
+                    # TODO ENVIADO DEL FICHERO
+                    with open(filename, "rb") as file:
+                        while True:
+                            chunk = file.read(FILE_PACKAGE_SIZE)
+                            if chunk == b'':
+                                break
+                            connection.sendall(chunk)
+
             finally:
                 connection.close()
         
-
     @staticmethod
     def _server_close ():
         try:
-            if client._is_server_open:
-                client._is_server_open = False
-                client._hilo.join()
-                client._server_sock.close()
+            if client._local_server_open:
+                client._local_server_open = False
+                client._local_server_thread.join()
+                client._local_server_sock.close()
         except Exception as e:
             print(f"Hubo un error cerrando el client-side-server:\n{e}")
 
 
-    # ******************** METHODS *******************
-    # *
-    # * @param user - User name to register in the system
-    # * 
-    # * @return OK if successful
-    # * @return USER_ERROR if the user is already registered
-    # * @return ERROR if another error occurred
+
+    # =================================================================================================
+    # Funcionalidades del cliente
+    # =================================================================================================
+
+
     @staticmethod
     def  register(user) :
         try:
-            client._client_open()
-            client._sendMessage(client._client_sock, "REGISTER")
-            client._sendMessage(client._client_sock, user)
-            code = client._recieveCode(client._client_sock)
-            client._client_close()
+            sock = client._client_open(client._remote_server_ip, client._remote_server_port)
+            client._sendMessage(sock, "REGISTER")
+            client._sendMessage(sock, user)
+            code = client._recieveCode(sock)
+            client._client_close(sock)
         except Exception:
             code = 2
 
@@ -219,20 +282,14 @@ class client :
         
         return client.RC.ERROR
 
-    # *
-    # 	 * @param user - User name to unregister from the system
-    # 	 * 
-    # 	 * @return OK if successful
-    # 	 * @return USER_ERROR if the user does not exist
-    # 	 * @return ERROR if another error occurred
     @staticmethod
     def  unregister(user) :
         try:
-            client._client_open()
-            client._sendMessage(client._client_sock, "UNREGISTER")
-            client._sendMessage(client._client_sock, user)
-            code = client._recieveCode(client._client_sock)
-            client._client_close()
+            sock = client._client_open(client._remote_server_ip, client._remote_server_port)
+            client._sendMessage(sock, "UNREGISTER")
+            client._sendMessage(sock, user)
+            code = client._recieveCode(sock)
+            client._client_close(sock)
         except Exception as e:
             code = 2
         
@@ -247,27 +304,19 @@ class client :
             print("c> UNREGISTER FAIL")
             return client.RC.ERROR
         return client.RC.ERROR
-        
 
-
-    # *
-    # * @param user - User name to connect to the system
-    # * 
-    # * @return OK if successful
-    # * @return USER_ERROR if the user does not exist or if it is already connected
-    # * @return ERROR if another error occurred
     @staticmethod
     def  connect(user) :
         
         port = client._server_open()
 
         try:
-            client._client_open()
-            client._sendMessage(client._client_sock, "CONNECT")
-            client._sendMessage(client._client_sock, user)
-            client._sendMessage(client._client_sock, port)
-            code = client._recieveCode(client._client_sock)
-            client._client_close()
+            sock = client._client_open(client._remote_server_ip, client._remote_server_port)
+            client._sendMessage(sock, "CONNECT")
+            client._sendMessage(sock, user)
+            client._sendMessage(sock, port)
+            code = client._recieveCode(sock)
+            client._client_close(sock)
         except Exception as e:
             code = 3
 
@@ -282,6 +331,7 @@ class client :
             return client.RC.USER_ERROR
         elif code == 2:
             client._server_close()
+            client._user = user
             print("c> USER ALREADY CONNECTED")
             return client.RC.USER_ERROR
         elif code == 3:
@@ -290,136 +340,179 @@ class client :
             return client.RC.ERROR
         return client.RC.ERROR
 
-    # *
-    # * 
-    # * @return OK if successful
-    # * @return USER_ERROR if the user does not exist or if it is already connected
-    # * @return ERROR if another error occurred
     @staticmethod
     def  users() :
         try:
-            client._client_open()
-            client._sendMessage(client._client_sock, "USERS")
-            client._sendMessage(client._client_sock, client._user)
-            code = client._recieveCode(client._client_sock)
+            sock = client._client_open(client._remote_server_ip, client._remote_server_port)
+            client._sendMessage(sock, "USERS")
+            client._sendMessage(sock, client._user)
+            code = client._recieveCode(sock)
         except Exception as e:
             code = 2
 
         if code == 0:
-            number_users = int(client._recieveMessage(client._client_sock))
+            number_users = int(client._recieveMessage(sock))
             print(f"c> CONNECTED USERS ({number_users} users connected) OK")
+            # Reinicio de los valores para recibir todos los usuarios del servidor
+            user = ""
+            ip = ""
+            client._user_list = {}
+
+            # Tokenizamos las cadenas de los usuarios y los almacenamos
             for i in range(number_users):
-                print(client._recieveMessage(client._client_sock))
-            client._client_close()
+                # Tokenizamos los valores extraídos del usuario
+                datos = client._recieveMessage(sock).split("::")
+                maxuserlen = max(len(user), len(datos[0]))
+                maxiplen = max(len(ip), len(datos[1]))
+                user, ip, port = datos[0], datos[1], datos[2]
+                client._user_list[user] = {"ip": ip, "port": port}
+                # print(f"   {user}   {ip}   {port}") # 
+            
+            client._client_close(sock)
+
+            # Esta parte es innecesaria, está por estética
+            for user_key in client._user_list.keys():
+                ip = client._user_list[user_key]["ip"]
+                port = client._user_list[user_key]["port"]
+                
+                userlen = maxuserlen - len(user_key)
+                iplen = maxiplen - len(ip)
+                
+                print(f"   {user_key + (userlen*" ")}   {ip + (iplen*" ")}   {port}")
+            
             return client.RC.OK
         
         elif code == 1:
             print("c> CONNECTED USERS FAIL, USER IS NOT CONNECTED")
-            client._client_close()
+            client._client_close(sock)
             return client.RC.USER_ERROR
         
         elif code == 2:
             print("c> CONNECTED USERS FAIL")
-            client._client_close()
+            client._client_close(sock)
             return client.RC.ERROR
         
         return client.RC.ERROR
 
-
-
-    # *
-    # * @param user - User name to disconnect from the system
-    # * 
-    # * @return OK if successful
-    # * @return USER_ERROR if the user does not exist
-    # * @return ERROR if another error occurred
     @staticmethod
     def  disconnect(user) :
         try:
-            client._client_open()
-            client._sendMessage(client._client_sock, "DISCONNECT")
-            client._sendMessage(client._client_sock, user)
-            code = client._recieveCode(client._client_sock)
-            client._client_close()
+            sock = client._client_open(client._remote_server_ip, client._remote_server_port)
+            client._sendMessage(sock, "DISCONNECT")
+            client._sendMessage(sock, user)
+            code = client._recieveCode(sock)
+            client._client_close(sock)
+            client._server_close()
         except Exception as e:
             code = 3
 
-
-        # Si se realizó con éxito cerramos el hilo
         if code == 0:
-            client._server_close()
             print("c> DISCONNECT OK")
             return client.RC.OK
-            
         if code == 1:
             print("c> DISCONNECT FAIL, USER DOES NOT EXIST")
             return client.RC.USER_ERROR
-
         if code == 2:
             print("c> DISCONNECT FAIL, USER NOT CONNECTED")
             return client.RC.USER_ERROR
-
         if code == 3:
             print("c> DISCONNECT FAIL")
             return client.RC.ERROR
 
         return client.RC.ERROR
 
-    # *
-    # * @param user    - Receiver user name
-    # * @param message - Message to be sent
-    # * 
-    # * @return OK if the server had successfully delivered the message
-    # * @return USER_ERROR if the user is not connected (the message is queued for delivery)
-    # * @return ERROR the user does not exist or another error occurred
-    # TODO PREGUNTAR SOBRE LOS CODIGOS DE RETORNO (CASOS) Y EL ORDEN DE OPERACIONES DEL SEND EN SERVER.C
-    # TODO PREGUNTAR SOBRE LOS CODIGOS DE RETORNO (CASOS) Y EL ORDEN DE OPERACIONES DEL SEND EN SERVER.C
-    # TODO PREGUNTAR SOBRE LOS CODIGOS DE RETORNO (CASOS) Y EL ORDEN DE OPERACIONES DEL SEND EN SERVER.C
     @staticmethod
     def  send(user,  message) :
+        if client._user == None:
+            print(f"c> TERMINAL DOESN'T KNOW WHICH USER IS SENDING THIS")
+            return client.RC.USER_ERROR
+        
         try:
-            client._client_open()
-            client._sendMessage(client._client_sock, "SEND")
-            client._sendMessage(client._client_sock, client._user)
-            client._sendMessage(client._client_sock, user)
-            client._sendMessage(client._client_sock, message)
-            code = client._recieveCode(client._client_sock)
-            print(code)
+            sock = client._client_open(client._remote_server_ip, client._remote_server_port)
+            client._sendMessage(sock, "SEND")
+            client._sendMessage(sock, client._user)
+            client._sendMessage(sock, user)
+            client._sendMessage(sock, message)
+            code = client._recieveCode(sock)
         except Exception:
             code = 2
         
-
         if code == 0:
-            message_id = int(client._recieveMessage(client._client_sock))
+            message_id = int(client._recieveMessage(sock))
             print(f"c> SEND OK - MESSAGE {message_id}")
         if code == 1:
             print("c> SEND FAIL, USER DOES NOT EXIST")
         if code == 2:
             print("c> SEND FAIL")
         
-        client._client_close()
+        client._client_close(sock)
         return client.RC.ERROR
 
-    # *
-    # * @param user    - Receiver user name
-    # * @param file    - file  to be sent
-    # * @param message - Message to be sent
-    # * 
-    # * @return OK if the server had successfully delivered the message
-    # * @return USER_ERROR if the user is not connected (the message is queued for delivery)
-    # * @return ERROR the user does not exist or another error occurred
     @staticmethod
     def  sendAttach(user,  file,  message) :
-        #  Write your code here
+        if client._user == None:
+            print(f"c> TERMINAL DOESN'T KNOW WHICH USER IS SENDING THIS")
+            return client.RC.USER_ERROR
+        
+        try:
+            sock = client._client_open(client._remote_server_ip, client._remote_server_port)
+            client._sendMessage(sock, "SENDATTACH")
+            client._sendMessage(sock, client._user)
+            client._sendMessage(sock, user)
+            client._sendMessage(sock, message)
+            client._sendMessage(sock, file)
+            code = client._recieveCode(sock)
+        except Exception:
+            code = 2
+        
+        if code == 0:
+            message_id = int(client._recieveMessage(sock))
+            print(f"c> SENDATTACH OK - MESSAGE {message_id}")
+        if code == 1:
+            print("c> SENDATTACH FAIL, USER DOES NOT EXIST")
+        if code == 2:
+            print("c> SENDATTACH FAIL")
+        
+        client._client_close(sock)
+
         return client.RC.ERROR
 
-    # *
-    # **
-    # * @brief Command interpreter for the client. It calls the protocol functions.
+    @staticmethod
+    def  getFile(user,  filename,  filedestiny) :
+        # Obtener la ip del usuario
+        ip, port = client._user_list[user]["ip"], int(client._user_list[user]["port"])
+
+        # Abrimos la conexion con el otro usuario
+        try:
+            sock = client._client_open(ip, port)
+            client._sendMessage(sock, "GET_FILE")
+            client._sendMessage(sock, client._user)
+            client._sendMessage(sock, filename)
+            # TODO RECIBIR FICHERO
+            with open(filedestiny, "wb") as file:
+                while True:
+                    chunk = sock.recv(FILE_PACKAGE_SIZE)
+                    if chunk == b'':
+                        break
+                    file.write(chunk)
+
+            client._client_close(sock)
+        except Exception as e:
+            print(f"Error en getFile: {e}")
+
+
+    
+
+    # =================================================================================================
+    # Shell, usage, parseArguments y main
+    # =================================================================================================
+
+
     @staticmethod
     def shell():
 
         while (True) :
+            time.sleep(1)
             try :
                 command = input("c> ")
                 line = command.split(" ")
@@ -472,6 +565,13 @@ class client :
                             client.sendAttach(line[1], line[2], message)
                         else :
                             print("Syntax error. Usage: SENDATTACH <userName> <filename> <message>")
+                    
+                    elif(line[0]=="GETFILE") :
+                        if (len(line) >= 4) :
+                            #  Remove first two words
+                            client.getFile(line[1], line[2], line[3])
+                        else :
+                            print("Syntax error. Usage: GETFILE <userName> <filename> <localfilename>")
 
                     elif(line[0]=="QUIT") :
                         if (len(line) == 1) :
@@ -484,15 +584,10 @@ class client :
             except Exception as e:
                 print("Exception: " + str(e))
 
-    # *
-    # * @brief Prints program usage
     @staticmethod
     def usage() :
         print("Usage: python3 client.py -s <server> -p <port>")
 
-
-    # *
-    # * @brief Parses program execution arguments
     @staticmethod
     def  parseArguments(argv) :
         parser = argparse.ArgumentParser()
@@ -508,13 +603,11 @@ class client :
             parser.error("Error: Port must be in the range 1024 <= port <= 65535");
             return False
         
-        client._server = args.s
-        client._port = args.p
+        client._remote_server_ip = args.s
+        client._remote_server_port = args.p
 
         return True
 
-
-    # ******************** MAIN *********************
     @staticmethod
     def main(argv) :
         if (not client.parseArguments(argv)) :
@@ -524,18 +617,9 @@ class client :
         #  Write code here
         client.shell()
         print("+++ FINISHED +++")
-    
-    @staticmethod
-    def test():
-        client.parseArguments([])
-        client._client_open()
-        client._sendMessage(client._client_sock, "CONNECT")
-        client._sendMessage(client._client_sock, "USUARIO")
-        client._sendMessage(client._client_sock, str(123))
-        client._client_close()
-        return 0
 
-    
+    # Fin de class client
+
 
 if __name__=="__main__":
     client.main([])

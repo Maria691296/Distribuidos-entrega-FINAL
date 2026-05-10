@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <limits.h>
 
 
 sem_t semaforo;
@@ -221,7 +222,6 @@ void my_register(int newsd) {
 void my_unregister(int newsd) {
     // Declaración de variables necesarias
     int codigo_respuesta = -1;
-    char buffer[MAX_STR_LEN];
     char user[MAX_STR_LEN];
 
     // Recibimos la cadena que representa al usuario
@@ -245,7 +245,7 @@ void my_users(int newsd) {
     int codigo_respuesta = -1;
     char buffer[MAX_STR_LEN];
     char user[MAX_STR_LEN];
-    char **user_list;
+    user_t **user_list;
 
     // Recibimos la cadena que representa al usuario
     readMessage(newsd, user);
@@ -272,7 +272,7 @@ void my_users(int newsd) {
 
     // Y le mandamos cada usuario por separado
     for (int i = 0; i < my_db.connected_users; i++) {
-        sprintf(buffer, "   %s", user_list[i]);
+        sprintf(buffer, "%s::%s::%d", user_list[i]->user, user_list[i]->return_ip, user_list[i]->return_port);
         sendMessage(newsd, buffer, strlen(buffer)+1);
         free(user_list[i]);
     }
@@ -282,28 +282,30 @@ void my_users(int newsd) {
 }
 
 
-// Función que se ejecuta cuando el usuario manda un SEND
+// Función que se ejecuta cuando el usuario manda un SEND o SENDATTACH
 // Nota: Resulta pesada para la base de datos, se tiene que adueñar un rato del mutex para que nadie modifique nada mientras trabaja
-void my_send(int newsd) {
+void my_send(int newsd, int is_sendattach) {
 
     // Declaración de variables necesarias
     int codigo_respuesta = -1;
     int state_user_from = -1;
     int state_user_to = -1;
-    int id_mensaje = -1;
     char buffer[MAX_STR_LEN];
     char user_from[MAX_STR_LEN];
     char user_to[MAX_STR_LEN];
     char message[MAX_STR_LEN];
+    char filename[MAX_STR_LEN] = ""; // Iniciado a nulo para que SEND funcione
     message_t *message_ptr = NULL;
 
     // Recibimos a los usuarios implicados, el mensaje
     readMessage(newsd, user_from);
     readMessage(newsd, user_to);
     readMessage(newsd, message);
+    if (is_sendattach == 1) readMessage(newsd, filename);
 
     // DEBUG
-    printf("%s -> %s\n", user_from, user_to);
+    // printf("%s -> %s\n", user_from, user_to);
+    // printf("SEND/SENDATTACH code is: %d\n", is_sendattach);
 
     // COMPROBACIONES INTERNAS
 
@@ -322,13 +324,18 @@ void my_send(int newsd) {
         return;
     }
 
+    // Actualizar el contador y verificar valor máximo
+    user_t *user_from_ptr = search_user(user_from);
+    unsigned int id_mensaje = ++user_from_ptr->message_id;
+    if (id_mensaje == UINT_MAX) user_from_ptr->message_id = 0;
+
     // Almacenamos el mensaje en la db
-    insert_message(user_to, id_mensaje, user_from, message);                 // TODO: GENERADOR DE IDS DE MENSAJE
+    insert_message(user_to, id_mensaje, user_from, message, filename);
 
     // Mandamos el código de respuesta de vuelta (el servidor ha recibido el mensaje)
     codigo_respuesta = 0;
     sendMessage(newsd, (char *) &codigo_respuesta, 1);
-    sendNumber(newsd, id_mensaje);                                           // TODO: GENERADOR DE IDS DE MENSAJE
+    sendNumber(newsd, id_mensaje);
 
     // Si el usuario receptor está conectado
     if (state_user_to == 0) {
@@ -340,13 +347,62 @@ void my_send(int newsd) {
         if (codigo_respuesta == 0) { my_send_ACK(message_ptr); free(message_ptr); }
 
         // Si no ha habido éxito, reinsertamos el mensaje donde estaba
-        if (codigo_respuesta != 0) insert_last_message(user_to, message_ptr);
+        if (codigo_respuesta != 0) {
+            insert_last_message(user_to, message_ptr);
+        }
     }
     pthread_mutex_unlock(&lock_db);
 }
 
 
-// Mandarle la confirmación al usuario de que se ha enviado su mensaje
+// Mandar mensajes de tipo SEND o SENDATTACH cuando el destinatario está conectado
+// 0 = OK // 1 = SOCKET_FAIL
+int my_send_connected (char *user, message_t *message) {
+
+    // Creamos el socket descriptor del s-s-c
+    int newsd = create_socket();
+    if (newsd < 0) return 1;
+
+    // Obtenemos los datos de la conexión del usuario para saber dónde mandar los datos
+    user_t *user_ptr = search_user(user);
+    struct sockaddr_in remote_addr = configure_socket(user_ptr->return_ip, user_ptr->return_port);
+
+    // Nos conectamos al thread
+    int ret = connect(newsd, (struct sockaddr *) &remote_addr, sizeof(remote_addr)) ;
+    if (ret < 0) {
+        perror("ERROR en connect: ");
+        return 1;
+    }
+
+    // Si el mensaje está asociado a un SEND...
+    if (strcmp(message->filename, "") == 0) {
+        char *op = "SEND_MESSAGE";
+        sendMessage(newsd, op, strlen(op) + 1);
+        sendMessage(newsd, message->transmitter, strlen(message->transmitter) + 1);
+        sendNumber(newsd, message->id);
+        sendMessage(newsd, message->message, strlen(message->message) + 1);
+    }
+    // Si el mensaje está asociado a un SENDATTACH...
+    else {
+        char *op = "SEND_MESSAGE_ATTACH";
+        sendMessage(newsd, op, strlen(op) + 1);
+        sendMessage(newsd, message->transmitter, strlen(message->transmitter) + 1);
+        sendNumber(newsd, message->id);
+        sendMessage(newsd, message->message, strlen(message->message) + 1);
+        sendMessage(newsd, message->filename, strlen(message->filename) + 1);
+    }
+
+    // Damos feedback del mensaje enviado
+    printf("\ns> SEND MESSAGE %d FROM %s TO %s\n", message->id, message->transmitter, user);  // TODO COMPROBAR PRINT GENÉRICO ESTA BIEN??
+
+    // Cerramos la conexión al thread de escucha
+    close(newsd);
+
+    return 0;
+}
+
+
+// Mandarle la confirmación de tipo SEND o SENDATTACH al usuario de que se ha enviado su mensaje
 // 
 int my_send_ACK (message_t *message) {
     
@@ -372,46 +428,23 @@ int my_send_ACK (message_t *message) {
         return 1;
     }
 
-    // Mandamos la operación y el identificador del mensaje
-    strcpy(buffer, "SEND_MESS_ACK");
-    sendMessage(ssc_sd, buffer, strlen(buffer) + 1);
-    sendNumber(ssc_sd, message->id);
+    // Si el mensaje está asociado a un SEND...
+    if (strcmp(message->filename, "") == 0) {
+        // Mandamos la operación y el identificador del mensaje
+        strcpy(buffer, "SEND_MESS_ACK");
+        sendMessage(ssc_sd, buffer, strlen(buffer) + 1);
+        sendNumber(ssc_sd, message->id);
+    }
+    // Si el mensaje está asociado a un SENDATTACH
+    else { // SENDATTACH
+        strcpy(buffer, "SEND_MESS_ATTACH_ACK");
+        sendMessage(ssc_sd, buffer, strlen(buffer) + 1);
+        sendNumber(ssc_sd, message->id);
+        sendMessage(ssc_sd, message->filename, strlen(message->filename) + 1);
+    }
 
     // Cerramos la conexión
     close(ssc_sd);
-
-    return 0;
-}
-
-
-// Mandar mensajes cuando el destinatario está conectado
-// 0 = OK // 1 = SOCKET_FAIL
-int my_send_connected (char *user, message_t *message) {
-
-    // Creamos el socket descriptor del s-s-c
-    int newsd = create_socket();
-    if (newsd < 0) return 1;
-
-    // Obtenemos los datos de la conexión del usuario para saber dónde mandar los datos
-    user_t *user_ptr = search_user(user);
-    struct sockaddr_in remote_addr = configure_socket(user_ptr->return_ip, user_ptr->return_port);
-
-    // Nos conectamos al thread
-    int ret = connect(newsd, (struct sockaddr *) &remote_addr, sizeof(remote_addr)) ;
-    if (ret < 0) {
-        perror("ERROR en connect: ");
-        return 1;
-    }
-
-    // Le mandamos al thread de escucha la operacion, emisor, receptor y mensaje
-    char *op = "SEND_MESSAGE";
-    sendMessage(newsd, op, strlen(op) + 1);
-    sendMessage(newsd, message->transmitter, strlen(message->transmitter) + 1);
-    sendNumber(newsd, message->id);
-    sendMessage(newsd, message->message, strlen(message->message) + 1);
-
-    // Cerramos la conexión al thread de escucha
-    close(newsd);
 
     return 0;
 }
@@ -444,6 +477,8 @@ void *atender_peticion ( void *arg )
     char buffer[MAX_STR_LEN];
     readMessage(newsd, buffer);
 
+    // DEBUG
+    // printf("Operacion %s recibida con strcmp = %d\n", buffer, strcmp("SEND", buffer));
 
     // Y seleccionamos el manejador adecuado
 
@@ -457,7 +492,10 @@ void *atender_peticion ( void *arg )
 
     if (strcmp("USERS", buffer) == 0) my_users(newsd);
 
-    if (strcmp("SEND", buffer) == 0) my_send(newsd);
+    if (strcmp("SEND", buffer) == 0) my_send(newsd, 0);
+
+    if (strcmp("SENDATTACH", buffer) == 0) my_send(newsd, 1);
+
 
     
     // Cerrar la conexion y liberar el semáforo

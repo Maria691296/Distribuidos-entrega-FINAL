@@ -82,7 +82,7 @@ void my_users(int newsd);
 
 // Función que se ejecuta cuando el usuario manda un SEND
 // Nota: Resulta pesada para la base de datos, se tiene que adueñar un rato del mutex para que nadie modifique nada mientras trabaja
-void my_send(int newsd);
+void my_send(int newsd, int is_sendattach);
 
 // Mandarle la confirmación al usuario de que se ha enviado su mensaje
 // 

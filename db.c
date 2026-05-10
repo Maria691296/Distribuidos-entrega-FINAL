@@ -3,10 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Iniciamos una db vacía global (para todo el programa)
-user_list_t my_db = {NULL, NULL, 0, 0};
 
-// Iniciamos un mutex global (para todo el programa)
+// Iniciamos la db a cero y creamos su mutex
+user_list_t my_db = {NULL, NULL, 0, 0};
 pthread_mutex_t lock_db = PTHREAD_MUTEX_INITIALIZER;
 
 
@@ -73,20 +72,6 @@ int db_test () {
 
     exit(0);
 
-    insert_message("A", 1, "CastaG", "Hola pa ti mi cola");
-    insert_message("B", 2, "CastaG", "Hola pa ti mi cola");
-    insert_message("C", 3, "CastaG", "Hola pa ti mi cola");
-    insert_message("A", 4, "CastaG", "Hola pa ti mi cola");
-    insert_message("B", 5, "CastaG", "Hola pa ti mi cola");
-    insert_message("C", 6, "CastaG", "Hola pa ti mi cola");
-    insert_message("A", 7, "CastaG", "Hola pa ti mi cola");
-    insert_message("B", 8, "CastaG", "Hola pa ti mi cola");
-    insert_message("C", 9, "CastaG", "Hola pa ti mi cola");
-    insert_message("A", 10, "CastaG", "Hola pa ti mi cola");
-    insert_message("B", 11, "CastaG", "Hola pa ti mi cola");
-    insert_message("C", 12, "CastaG", "Hola pa ti mi cola");
-    insert_message("A", 13, "CastaG", "Hola pa ti mi cola");
-
     printall();
 
     save_db();
@@ -98,6 +83,7 @@ int db_test () {
 // ========================================================================
 
 
+// Inserta un usuario con todos sus valores reiniciados
 // 0 = OK // 1 = USER_NOT_FOUND
 int insert_user (char *user) { // TERMINADA
 
@@ -121,6 +107,7 @@ int insert_user (char *user) { // TERMINADA
     strcpy(new->return_ip, "");
     new->return_port = -1;
     new->connected = 0;
+    new->message_id = 0;
     new->next = NULL;
     new->prev = my_db.tail;
     new->messages = NULL;
@@ -148,6 +135,7 @@ int insert_user (char *user) { // TERMINADA
 }
 
 
+// Elimina un usuario de la db
 // 0 = OK // 1 = USER_NOT_FOUND
 int delete_user (char *user) { // TERMINADA
 
@@ -160,6 +148,9 @@ int delete_user (char *user) { // TERMINADA
         pthread_mutex_unlock(&lock_db);
         return 1;
     }
+
+    // Si está conectado, lo descontamos
+    my_db.connected_users -= current->connected;
 
     // Si se encuentra, guardamos los punteros de sus vecinos
     user_t *following = current->next;
@@ -219,6 +210,7 @@ int delete_user (char *user) { // TERMINADA
 }
 
 
+// Establece el atributo connected a 1 si no estuviese ya
 // 0 = OK // 1 = USER_NOT_FOUND // 2 = USER_ALREADY_CONNECTED
 int connect_user (char *user, char *ip, int port) { // TERMINADA
 
@@ -237,11 +229,10 @@ int connect_user (char *user, char *ip, int port) { // TERMINADA
         return 2;
     }
 
-    size_t max_ip_size = sizeof(current->return_ip) - 1;
+    size_t max_ip_size = sizeof(current->return_ip);
 
     current->connected = 1;
     strncpy(current->return_ip, ip, max_ip_size);
-    current->return_ip[max_ip_size] = '\0';
     current->return_port = port;
 
     my_db.connected_users++;
@@ -255,6 +246,7 @@ int connect_user (char *user, char *ip, int port) { // TERMINADA
 }
 
 
+// Establece el atributo connected a 0 si no lo estuviese ya
 // 0 = OK // 1 = USER_NOT_FOUND // 2 = USER_ALREADY_DISCONNECTED
 int disconnect_user (char *user) { // TERMINADA
 
@@ -296,6 +288,7 @@ int disconnect_user (char *user) { // TERMINADA
 // ========================================================================
 
 
+// Busca al usuario y retorna su puntero si lo encuentra
 // ptr = OK // NULL = USER_NOT_FOUND
 user_t *search_user (char *user) { // TERMINADA (protegida por sus llamantes)
 
@@ -307,10 +300,10 @@ user_t *search_user (char *user) { // TERMINADA (protegida por sus llamantes)
     }
 
     return current;
-
 }
 
 
+// Busca al usuario y retorna un código en función de su estado
 // 0 = CONNECTED // 1 = DISCONNECTED // 2 = USER_NOT_FOUND
 int check_user_status (char *user) { // 
     user_t *current = search_user(user);
@@ -331,32 +324,33 @@ int check_user_status (char *user) { //
 
 // Retorna el listado de usuarios conectados en ese momento
 // NULL = 0 usuarios // ptr = 1 o más usuarios
-char **return_connected () {
+user_t **return_connected () {
 
     // Si no hay nadie conectado
     if (my_db.connected_users == 0) return NULL;
 
     int pos = 0;
-    user_t *current = my_db.head;
+    user_t *current_user = my_db.head;
     
-    char *current_ptr = NULL;
-    char **lista_conectados = (char**) malloc (my_db.connected_users * sizeof(char*));
+    user_t *current_ptr = NULL;
+    user_t **lista_conectados = (user_t**) malloc (my_db.connected_users * sizeof(user_t*));
 
-    while (current != NULL) {
-        if (current->connected == 1) {
-            current_ptr = (char*) malloc (MAX_STR_LEN);
-            strncpy(current_ptr, current->user, MAX_STR_LEN);
+    while (current_user != NULL) {
+        if (current_user->connected == 1) {
+            current_ptr = (user_t*) malloc (sizeof(user_t));
+            *current_ptr = *current_user;
             lista_conectados[pos++] = current_ptr;
         }
-        current = current->next;
+        current_user = current_user->next;
     }
     
     return lista_conectados;
 }
 
 
+// Inserta un mensaje nuevo al final de la lista de mensajes del usuario
 // 0 = OK // 1 = USER_NOT_FOUND
-int insert_message (char *user, int message_id, char *transmitter, char *message) { // TERMINADA
+int insert_message (char *user, int message_id, char *transmitter, char *message, char *filename) { // TERMINADA
     
     user_t *current_user = search_user(user);
     if (current_user == NULL) {
@@ -373,6 +367,7 @@ int insert_message (char *user, int message_id, char *transmitter, char *message
     strncpy(new->transmitter, transmitter, max_transmitter_size);
     new->transmitter[max_transmitter_size] = '\0';
     strncpy(new->message, message, max_message_size);
+    strncpy(new->filename, filename, max_message_size);
     new->message[max_message_size] = '\0';
     new->next = NULL;
 
@@ -400,6 +395,7 @@ int insert_message (char *user, int message_id, char *transmitter, char *message
 }
 
 
+// Inserta un mensaje ya existente al comienzo de la lista de mensajes del usuario
 // 0 = OK // 1 = USER_NOT_FOUND
 int insert_first_message (char *user, message_t *message) { // TERMINADA
     
@@ -432,6 +428,7 @@ int insert_first_message (char *user, message_t *message) { // TERMINADA
 }
 
 
+// Inserta un mensaje ya existente al final de la lista de mensajes del usuario
 // 0 = OK // 1 = USER_NOT_FOUND
 int insert_last_message (char *user, message_t *new_head_message) {
     
@@ -457,6 +454,7 @@ int insert_last_message (char *user, message_t *new_head_message) {
 }
 
 
+// Extrae un mensaje del comienzo de la lista de mensajes del usuario
 // ptr = OK // NULL = USER_NOT_FOUND, MESSAGE_NOT_FOUND
 message_t *pop_first_message (char *user) {
 
@@ -498,6 +496,7 @@ message_t *pop_first_message (char *user) {
 }
 
 
+// Extrae un mensaje del final de la lista de mensajes del usuario
 // ptr = OK // NULL = USER_NOT_FOUND, MESSAGE_NOT_FOUND
 message_t *pop_last_message (char *user) {
 
@@ -525,20 +524,21 @@ message_t *pop_last_message (char *user) {
 }
 
 
-int load_db () { // TERMINADA (no se usa en un momento concurrente)
+// Carga la db de los ficheros a memoria
+void load_db () { // TERMINADA (no se usa en un momento concurrente)
     
     // Abrimos el fichero de usuarios
     FILE *fdu = fopen(DB_USERS, "r");
     if (fdu == NULL) {
         perror("Error al abrir el archivo");
-        return -1;
+        return;
     }
 
     // Abrimos el fichero de mensajes
     FILE *fdm = fopen(DB_MESSAGES, "r");
     if (fdm == NULL) {
         perror("Error al abrir el archivo");
-        return -1;
+        return;
     }
 
     // Aquí almacenamos las líneas que leamos
@@ -560,6 +560,7 @@ int load_db () { // TERMINADA (no se usa en un momento concurrente)
     int id;
     char *transmitter;
     char *message;
+    char *filename;
     
     // Leemos y cargamos cada mensaje
     while (fgets(line, sizeof(line), fdm)) {
@@ -573,27 +574,29 @@ int load_db () { // TERMINADA (no se usa en un momento concurrente)
         id = atoi(strtok(NULL, "|"));
         transmitter = strtok(NULL, "|");
         message = strtok(NULL, "|");
+        filename = strtok(NULL, "|");
 
         // Introducimos el mensaje leído
-        insert_message(user, id, transmitter, message);
+        insert_message(user, id, transmitter, message, filename);
     }
 }
 
 
-int save_db () { // TERMINADA (protegida por otras funciones)
+// Guarda el estado de la db en memoria en los ficheros
+void save_db () { // TERMINADA (protegida por otras funciones)
     
     // Abrimos el fichero de usuarios
     FILE *fdu = fopen(DB_USERS, "w");
     if (fdu == NULL) {
         perror("Error al abrir el archivo");
-        return -1;
+        return;
     }
 
     // Abrimos el fichero de mensajes
     FILE *fdm = fopen(DB_MESSAGES, "w");
     if (fdm == NULL) {
         perror("Error al abrir el archivo");
-        return -1;
+        return;
     }
 
     // Punteros para recorrer la estructura
@@ -610,7 +613,7 @@ int save_db () { // TERMINADA (protegida por otras funciones)
 
         // Escribimos todos los mensajes almacenados del usuario
         while (current_message != NULL) {
-            fprintf(fdm, "%s|%d|%s|%s\n", current_user->user, current_message->id, current_message->transmitter, current_message->message);
+            fprintf(fdm, "%s|%d|%s|%s|%s\n", current_user->user, current_message->id, current_message->transmitter, current_message->message, current_message->filename);
             current_message = current_message->next;
         }
 

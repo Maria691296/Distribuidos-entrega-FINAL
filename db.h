@@ -9,9 +9,10 @@
 
 typedef struct message_node {
     // Datos del mensaje
-    int id;
+    unsigned int id;
     char transmitter[256];
     char message[256];
+    char filename[256];
     // Puntero al siguiente mensaje
     struct message_node *next;
 } message_t;
@@ -22,6 +23,7 @@ typedef struct user_node {
     char return_ip[16];
     int return_port;
     int connected;
+    unsigned int message_id;
     // Punteros los usuarios vecinos
     struct user_node *next;
     struct user_node *prev;
@@ -49,10 +51,10 @@ int connect_user (char *user, char *ip, int port);
 int disconnect_user (char *user);
 
 int check_user_status (char *user);
-char **return_connected ();
+user_t **return_connected ();
 
 // Funciones de mensaje
-int insert_message (char *user, int message_id, char *transmitter, char *message);
+int insert_message (char *user, int message_id, char *transmitter, char *message, char *filename);
 // 0 = OK // 1 = USER_NOT_FOUND
 int insert_first_message (char *user, message_t *message);
 int insert_last_message (char *user, message_t *new_head_message);
@@ -61,7 +63,7 @@ message_t *pop_last_message (char *user);
 int delete_messages (char * user);
 
 // Funciones de ficheros
-int load_db ();
-int save_db();
+void load_db ();
+void save_db();
 
 #endif
