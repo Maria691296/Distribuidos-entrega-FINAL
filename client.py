@@ -1,3 +1,4 @@
+from zeep import Client as SoapClient
 from enum import Enum
 import threading
 import argparse
@@ -9,6 +10,7 @@ SO_MAX_CONN = 20
 SOCK_TIMEOUT = 1
 MAX_STR_LEN = 256
 FILE_PACKAGE_SIZE = 1024
+WS_WSDL = 'http://localhost:8000/?wsdl'
 
 class client :
 
@@ -113,6 +115,15 @@ class client :
             # print(f"Error inesperado: {e}")
             raise Exception(f"{e}")
 
+    # Normaliza un mensaje usando el servicio web SOAP
+    @staticmethod
+    def _normalize_message(message):
+        try:
+            soap_client = SoapClient(WS_WSDL)
+            return soap_client.service.normalize(message)
+        except Exception:
+            print("c> AVISO: Servicio de normalización no disponible")
+            return message
 
 
     # =================================================================================================
@@ -377,8 +388,10 @@ class client :
                 
                 userlen = maxuserlen - len(user_key)
                 iplen = maxiplen - len(ip)
-                
-                print(f"   {user_key + (userlen*" ")}   {ip + (iplen*" ")}   {port}")
+
+                user_padding = user_key + (" " * userlen)
+                ip_padding = ip + (" " * iplen)
+                print(f"   {user_padding}   {ip_padding}   {port}")
             
             return client.RC.OK
         
@@ -432,7 +445,7 @@ class client :
             client._sendMessage(sock, "SEND")
             client._sendMessage(sock, client._user)
             client._sendMessage(sock, user)
-            client._sendMessage(sock, message)
+            client._sendMessage(sock, client._normalize_message(message))
             code = client._recieveCode(sock)
         except Exception:
             code = 2
@@ -459,7 +472,7 @@ class client :
             client._sendMessage(sock, "SENDATTACH")
             client._sendMessage(sock, client._user)
             client._sendMessage(sock, user)
-            client._sendMessage(sock, message)
+            client._sendMessage(sock, client._normalize_message(message))
             client._sendMessage(sock, file)
             code = client._recieveCode(sock)
         except Exception:

@@ -1,5 +1,6 @@
 #include "db.h"
 #include "server.h"
+#include "log.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -13,6 +14,7 @@
 
 
 sem_t semaforo;
+char *LOG_RPC_IP;
 
 
 // ========================================================================
@@ -243,7 +245,7 @@ void my_users(int newsd) {
     
     // Declaración de variables necesarias
     int codigo_respuesta = -1;
-    char buffer[MAX_STR_LEN];
+    char buffer[MAX_STR_LEN*3];
     char user[MAX_STR_LEN];
     user_t **user_list;
 
@@ -519,6 +521,12 @@ int main ( int argc, char **argv )
 
     // Cargamos la db (usuarios y mensajes) en RAM
     load_db();
+
+    // Obtenemos el valor de la variable de entorno para RPC
+    LOG_RPC_IP = getenv("LOG_RPC_IP");
+    
+    // DEBUG
+    printf("c> LOG_RPC_IP = %s\n", LOG_RPC_IP);
 
     // Almacenamos el puerto de alojamiento del servidor
     int puerto = atoi(argv[1]) ;
