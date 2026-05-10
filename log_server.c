@@ -9,9 +9,9 @@
 bool_t
 log_operation_1_svc(char *user, char *operation, char *filename, int *result,  struct svc_req *rqstp)
 {
-	bool_t retval;
+	bool_t retval = TRUE;
 
-	printf("l> %s   %s   %s\n", user, operation, filename );
+	printf("l> %s   %s %s\n", user, operation, filename );
 	*result = 1;
 
 	return retval;

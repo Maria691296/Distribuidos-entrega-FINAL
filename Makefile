@@ -18,16 +18,20 @@ TARGETS = log.h log_xdr.c log_clnt.c log_svc.c log_client.c log_server.c
 
 OBJECTS_CLNT = $(SOURCES_CLNT.c:%.c=%.o) $(TARGETS_CLNT.c:%.c=%.o)
 OBJECTS_SVC = $(SOURCES_SVC.c:%.c=%.o) $(TARGETS_SVC.c:%.c=%.o)
-# Compiler flags 
 
-CPPFLAGS += -D_REENTRANT
+# Compiler flags 
+CPPFLAGS += -D_REENTRANT -I/usr/include/tirpc
 CFLAGS += -g 
-LDLIBS += -lnsl -lpthread 
- RPCGENFLAGS = -NM
+LDLIBS += -lnsl -lpthread -ltirpc
+RPCGENFLAGS = -NM
+
+# Main server
+MAIN_SERVER = server
+OBJECTS_MAIN = server.o db.o log_clnt.o log_xdr.o
 
 # Targets 
 
-all : server $(CLIENT) $(SERVER)
+all : $(MAIN_SERVER) $(CLIENT) $(SERVER)
 
 $(TARGETS) : $(SOURCES.x) 
 	rpcgen $(RPCGENFLAGS) $(SOURCES.x)
@@ -42,8 +46,10 @@ $(CLIENT) : $(OBJECTS_CLNT)
 $(SERVER) : $(OBJECTS_SVC) 
 	$(LINK.c) -o $(SERVER) $(OBJECTS_SVC) $(LDLIBS)
 
-server : server.c server.h db.c db.h log.h
-	gcc server.c db.c log_clnt.c log_xdr.c -o server -lpthread -lnsl
+$(MAIN_SERVER) : $(OBJECTS_MAIN)
+	$(LINK.c) -o $(MAIN_SERVER) $(OBJECTS_MAIN) $(LDLIBS)
 
- clean:
-	 $(RM) core log.h log_xdr.c log_clnt.c log_svc.c $(OBJECTS_CLNT) $(OBJECTS_SVC) $(CLIENT) $(SERVER) server
+$(OBJECTS_MAIN) : $(TARGETS) server.h db.h
+
+clean:
+	$(RM) core log.h log_xdr.c log_clnt.c log_svc.c $(OBJECTS_CLNT) $(OBJECTS_SVC) $(OBJECTS_MAIN) $(CLIENT) $(SERVER) $(MAIN_SERVER)

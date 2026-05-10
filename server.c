@@ -18,6 +18,38 @@ char *LOG_RPC_IP;
 
 
 // ========================================================================
+// COMUNICACIÓN CON RPC
+// ========================================================================
+
+//
+void rpc_log(char *user, char *operation, char *filename) {
+    if (LOG_RPC_IP == NULL) {
+        printf("s> LOG_RPC_IP no configurada, no se loguea\n");
+        return;
+    }
+
+    CLIENT *clnt;
+    int result;
+    enum clnt_stat retval;
+
+    // Crear conexión RPC al log_server
+    clnt = clnt_create(LOG_RPC_IP, LOG, LOGVER, "tcp");
+    if (clnt == NULL) {
+        clnt_pcreateerror(LOG_RPC_IP);
+        return;
+    }
+
+    // Llamar a log_operation
+    retval = log_operation_1(user, operation, filename, &result, clnt);
+    if (retval != RPC_SUCCESS) {
+        clnt_perror(clnt, "call failed");
+    }
+
+    clnt_destroy(clnt);
+}
+
+
+// ========================================================================
 // CREACIÓN DE UN SOCKET
 // ========================================================================
 
@@ -143,10 +175,11 @@ void my_connect(int newsd, char *peer_ip) {
 
     // Recibimos la cadena que representa al usuario
     readMessage(newsd, user);
-
-    // Recibimos la cadena que representa al puerto
     readMessage(newsd, port);
     listen_port = atoi(port);
+
+    // Registramos los datos de operación con RPC
+    rpc_log(user, "CONNECT", "");
 
     // Ejecutamos la función real sobre la db
     codigo_respuesta = connect_user(user, peer_ip, listen_port);
@@ -187,6 +220,9 @@ void my_disconnect(int newsd) {
     // Recibimos la cadena que representa al usuario
     readMessage(newsd, user);
 
+    // Registramos los datos de operación con RPC
+    rpc_log(user, "DISCONNECT", "");
+
     // Ejecutamos la funcionalidad real sobre la db
     codigo_respuesta = disconnect_user(user);
 
@@ -210,6 +246,9 @@ void my_register(int newsd) {
     // Ejecutamos el código real de la db
     codigo_respuesta = insert_user(user);
 
+    // Registramos los datos de operación con RPC
+    rpc_log(user, "REGISTER", "");
+
     // Feedback por terminal del servidor
     if (codigo_respuesta == 0) printf("s> REGISTER %s OK\n", user);
     else printf("s> REGISTER %s FAIL\n", user);
@@ -228,6 +267,9 @@ void my_unregister(int newsd) {
 
     // Recibimos la cadena que representa al usuario
     readMessage(newsd, user);
+
+    // Registramos los datos de operación con RPC
+    rpc_log(user, "UNREGISTER", "");
 
     // Ejecutamos el código real de la db
     codigo_respuesta = delete_user(user);
@@ -251,9 +293,13 @@ void my_users(int newsd) {
 
     // Recibimos la cadena que representa al usuario
     readMessage(newsd, user);
+    
 
     // Acceso protegido a la db
     pthread_mutex_lock(&lock_db);
+
+    // Registramos los datos de operación con RPC
+    rpc_log(user, "USERS", "");
 
     codigo_respuesta = check_user_status(user);
     if (codigo_respuesta == 0) user_list = return_connected();
@@ -303,7 +349,17 @@ void my_send(int newsd, int is_sendattach) {
     readMessage(newsd, user_from);
     readMessage(newsd, user_to);
     readMessage(newsd, message);
-    if (is_sendattach == 1) readMessage(newsd, filename);
+    if (is_sendattach == 1) {
+        readMessage(newsd, filename);
+        // Registramos los datos de operación con RPC
+        rpc_log(user_from, "SENDATTACH", filename);
+    }
+
+    else {
+        // Registramos los datos de operación con RPC
+        rpc_log(user_from, "SEND", "");
+    }
+    
 
     // DEBUG
     // printf("%s -> %s\n", user_from, user_to);
